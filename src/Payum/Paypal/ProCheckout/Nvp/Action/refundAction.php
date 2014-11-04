@@ -12,9 +12,6 @@ use Payum\Core\Security\SensitiveValue;
 use Payum\Paypal\ProCheckout\Nvp\Api;
 use Payum\Core\Request\Refund;
 
-/**
- * @author Ton Sharp <Forma-PRO@66ton99.org.ua>
- */
 class RefundAction extends PaymentAwareAction implements ApiAwareInterface
 {
     /**
@@ -42,14 +39,30 @@ class RefundAction extends PaymentAwareAction implements ApiAwareInterface
         /** @var $request Refund */
         RequestNotSupportedException::assertSupports($this, $request);
 
-        $model = new ArrayObject($request->getModel());
+        $details = ArrayObject::ensureArrayObject($request->getModel());
 
-        if (is_numeric($model['RESULT'])) {
+        if (Api::TRXTYPE_CREDIT == $details['TRXTYPE']) {
             return;
         }
 
-        $model->replace($this->api->doCredit($model->toUnsafeArray()));
-        
+        $cardFields = array('ACCT', 'CVV2', 'EXPDATE');
+        if (false == $details->validateNotEmpty($cardFields, false)) {
+            try {
+                $this->payment->execute($obtainCreditCard = new ObtainCreditCard);
+
+                $card = $obtainCreditCard->obtain();
+
+                $model['EXPDATE'] = new SensitiveValue($card->getExpireAt()->format('my'));
+                $model['ACCT'] = new SensitiveValue($card->getNumber());
+                $model['CVV2'] = new SensitiveValue($card->getSecurityCode());
+            } catch (RequestNotSupportedException $e) {
+                throw new LogicException('Credit card details has to be set explicitly or there has to be an action that supports ObtainCreditCard request.');
+            }
+        }
+
+        $details['RESULT'] = null;
+
+        $details->replace($this->api->doCredit($details->toUnsafeArray()));
     }
 
     /**
